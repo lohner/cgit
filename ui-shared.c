@@ -493,10 +493,10 @@ static void cgit_self_link(char *name, const char *title, const char *class)
 	else if (!strcmp(ctx.qry.page, "stats"))
 		cgit_stats_link(name, title, class, ctx.qry.head,
 				ctx.qry.path);
-	else if (!strcmp(ctx->qry.page, "atom"))
-		cgit_diff_link(name, title, class, ctx->qry.head,
-				      ctx->qry.sha1, ctx->qry.sha2,
-				      ctx->qry.path, 0);
+	else if (!strcmp(ctx.qry.page, "atom"))
+		cgit_diff_link(name, title, class, ctx.qry.head,
+				ctx.qry.sha1, ctx.qry.sha2,
+				ctx.qry.path);
 
 	else {
 		/* Don't known how to make link for this page */

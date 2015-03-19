@@ -86,7 +86,7 @@ static void add_entry(struct commit *commit, struct commitinfo *info, const char
 		html("table.diff .add, span.add { background-color: #afa; }");
 		html("table.diff .del, span.remove { background-color: #faa; }");
 		html("</style>\n");
-		cgit_print_diff(hex, hex_parent, NULL);
+		cgit_print_diff(hex, hex_parent, NULL, 0, 0);
 		html("</pre>");
 	}
 	html("</div>\n");
