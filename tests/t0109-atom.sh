@@ -1,25 +1,24 @@
 #!/bin/sh
 
+test_description='Check content on atom feed page'
 . ./setup.sh
 
-prepare_tests "Check content on atom feed page"
+test_expect_success 'fetch feed' 'cgit_url "foo/atom" >tmp'
 
-run_test 'fetch feed' 'cgit_url "foo/atom" >trash/tmp'
+test_expect_success 'find feed open tag' 'grep -e "^<feed xmlns=.http://www\.w3\.org/2005/Atom.>" tmp'
 
-run_test 'find feed open tag' 'grep -e "^<feed xmlns=.http://www\.w3\.org/2005/Atom.>" trash/tmp'
+test_expect_success 'find title' 'grep -e "^<title>foo" tmp'
 
-run_test 'find title' 'grep -e "^<title>foo" trash/tmp'
+test_expect_success 'find entry title' 'grep -e "^<title>commit 5</title>" tmp'
 
-run_test 'find entry title' 'grep -e "^<title>commit 5</title>" trash/tmp'
+test_expect_success 'find entry diffstat' 'grep -e "^<div class=.diffstat-header.>" tmp'
 
-run_test 'find entry diffstat' 'grep -e "^<div class=.diffstat-header.>" trash/tmp'
+test_expect_success 'find entry diff' 'grep -e "<table summary=.diff. class=.diff.>" tmp'
 
-run_test 'find entry diff' 'grep -e "<table summary=.diff. class=.diff.>" trash/tmp'
+test_expect_success 'find diff content 1' 'grep -e "diff --git a/file-1 b/file-1" tmp'
 
-run_test 'find diff content 1' 'grep -e "diff --git a/file-1 b/file-1" trash/tmp'
+test_expect_success 'find diff content 2' 'grep -e "@@ -0,0 +1 @@" tmp'
 
-run_test 'find diff content 2' 'grep -e "@@ -0,0 +1 @@" trash/tmp'
+test_expect_success 'find diff content 3' 'grep -e "+1<" tmp'
 
-run_test 'find diff content 3' 'grep -e "+1<" trash/tmp'
-
-tests_done
+test_done
