@@ -9,6 +9,28 @@
 #define SZ_FMT "%zu"
 #endif
 
+#ifdef NO_TIMEGM
+time_t timegm(struct tm *tm)
+{
+	time_t ret;
+	char *tz;
+
+	tz = getenv("TZ");
+	if (tz)
+		tz = strdup(tz);
+	setenv("TZ", "", 1);
+	tzset();
+	ret = mktime(tm);
+	if (tz) {
+		setenv("TZ", tz, 1);
+		free(tz);
+	} else
+		unsetenv("TZ");
+	tzset();
+	return ret;
+}
+#endif
+
 struct authorstat {
 	long total;
 	struct string_list list;

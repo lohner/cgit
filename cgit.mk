@@ -25,6 +25,10 @@ ifdef NO_C99_FORMAT
 	CFLAGS += -DNO_C99_FORMAT
 endif
 
+ifdef NO_TIMEGM
+	CGIT_CFLAGS += -DNO_TIMEGM
+endif
+
 ifdef NO_LUA
 	LUA_MESSAGE := linking without specified Lua support
 	CGIT_CFLAGS += -DNO_LUA
