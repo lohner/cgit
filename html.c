@@ -89,9 +89,64 @@ void html_raw(const char *data, size_t size)
 		die_errno("write error on html output");
 }
 
+void html_utf8(const char *txt, int len)
+{
+	const char *t = txt;
+	int expect_utf8_bytes = 0;
+	while (t && *t && len--) {
+		unsigned char c = *t;
+		if (expect_utf8_bytes) {
+			if (c >> 6 == 0x2) {
+				expect_utf8_bytes--;
+				t++;
+				continue;
+			} else {
+				// invalid utf-8 sequence
+				int i;
+				for (i = 0; i < t - txt; i++) {
+					char cstr[15];
+					unsigned char c1 = *(txt + i);
+					sprintf(cstr, "&lt;%x&gt;", c1);
+					html_raw(cstr, strlen(cstr));
+				}
+				txt = t;
+				expect_utf8_bytes = 0;
+			}
+		}
+		if (c > 0x7f) {
+			html_raw(txt, t - txt);
+			txt = t;
+
+			if (c >> 5 == 0x6)
+				expect_utf8_bytes = 1;
+			else if (c >> 4 == 0xe)
+				expect_utf8_bytes = 2;
+			else if (c >> 3 == 0x1e)
+				expect_utf8_bytes = 3;
+			else {
+				char cstr[15];
+				sprintf(cstr, "&lt;%x&gt;", c);
+				html_raw(cstr, strlen(cstr));
+			}
+				
+		}
+		t++;
+	}
+	if (expect_utf8_bytes) {
+		int i;
+		for (i = 0; i < t - txt; t++) {
+			char cstr[15];
+			unsigned char c = *(txt + i);
+			sprintf(cstr, "&lt;%x&gt;", c);
+			html_raw(cstr, strlen(cstr));
+		}
+	} else if (t != txt)
+		html_raw(txt, t - txt);
+}
+
 void html(const char *txt)
 {
-	html_raw(txt, strlen(txt));
+	html_utf8(txt, strlen(txt));
 }
 
 void htmlf(const char *format, ...)
@@ -141,7 +196,7 @@ void html_txt(const char *txt)
 		unsigned char c = *t;
 		if ((c<0x20 && c!='\t' && c!='\n' && c!='\r')
 				|| (c=='<' || c=='>' || c=='&')) {
-			html_raw(txt, t - txt);
+			html_utf8(txt, t - txt);
 			if (c == '>')
 				html("&gt;");
 			else if (c == '<')
@@ -163,7 +218,7 @@ void html_ntxt(int len, const char *txt)
 		unsigned char c = *t;
 		if ((c<0x20 && c!='\t' && c!='\n' && c!='\r')
 				|| (c=='<' || c=='>' || c=='&')) {
-			html_raw(txt, t - txt);
+			html_utf8(txt, t - txt);
 			if (c == '>')
 				html("&gt;");
 			else if (c == '<')
@@ -198,9 +253,9 @@ void html_attr(const char *txt)
 	const char *t = txt;
 	while (t && *t) {
 		unsigned char c = *t;
-		if ((c=='<' || c=='>' || c=='\'' || c=='\"' || c=='&')
-				|| (c<0x20 && c!='\t' && c!='\n' && c!='\r')) {
-			html_raw(txt, t - txt);
+		if ((c<0x20 && c!='\t' && c!='\n' && c!='\r')
+				|| (c=='<' || c=='>' || c=='\'' || c=='\"' || c=='&')) {
+			html_utf8(txt, t - txt);
 			if (c == '>')
 				html("&gt;");
 			else if (c == '<')
