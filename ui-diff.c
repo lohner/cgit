@@ -445,6 +445,9 @@ void cgit_print_diff(const char *new_rev, const char *old_rev,
 
 	cgit_print_diffstat(old_rev_sha1, new_rev_sha1, prefix);
 
+	/* restore difftype (necessary for diffs in atom feeds) */
+	ctx.qry.difftype = difftype;
+
 	if (difftype == DIFF_STATONLY)
 		return;
 
