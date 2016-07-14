@@ -61,6 +61,8 @@ static int gitconfig_config(const char *key, const char *value, void *cb)
 		config_fn(repo, "desc", value);
 	else if (!strcmp(key, "gitweb.category"))
 		config_fn(repo, "section", value);
+	else if (!strcmp(key, "gitweb.homepage"))
+		config_fn(repo, "homepage", value);
 	else if (starts_with(key, "cgit."))
 		config_fn(repo, key + 5, value);
 
@@ -174,7 +176,7 @@ static void add_repo(const char *base, struct strbuf *path, repo_config_fn fn)
 
 	strbuf_addstr(path, "cgitrc");
 	if (!stat(path->buf, &st))
-		parse_configfile(xstrdup(path->buf), &repo_config);
+		parse_configfile(path->buf, &repo_config);
 
 	strbuf_release(&rel);
 }
@@ -244,7 +246,7 @@ void scan_projects(const char *path, const char *projectsfile, repo_config_fn fn
 			projectsfile, strerror(errno), errno);
 		return;
 	}
-	while (strbuf_getline(&line, projects, '\n') != EOF) {
+	while (strbuf_getline(&line, projects) != EOF) {
 		if (!line.len)
 			continue;
 		strbuf_insert(&line, 0, "/", 1);

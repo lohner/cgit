@@ -6,7 +6,6 @@
  *   (see COPYING for full license text)
  */
 
-#include <ctype.h>
 #include "cgit.h"
 #include "ui-tree.h"
 #include "html.h"
@@ -85,6 +84,37 @@ static void print_binary_buffer(char *buf, unsigned long size)
 	html("</table>\n");
 }
 
+static void set_title_from_path(const char *path)
+{
+	size_t path_len, path_index, path_last_end;
+	char *new_title;
+
+	if (!path)
+		return;
+
+	path_len = strlen(path);
+	new_title = xmalloc(path_len + 3 + strlen(ctx.page.title) + 1);
+	new_title[0] = '\0';
+
+	for (path_index = path_len, path_last_end = path_len; path_index-- > 0;) {
+		if (path[path_index] == '/') {
+			if (path_index == path_len - 1) {
+				path_last_end = path_index - 1;
+				continue;
+			}
+			strncat(new_title, &path[path_index + 1], path_last_end - path_index - 1);
+			strcat(new_title, "\\");
+			path_last_end = path_index;
+		}
+	}
+	if (path_last_end)
+		strncat(new_title, path, path_last_end);
+
+	strcat(new_title, " - ");
+	strcat(new_title, ctx.page.title);
+	ctx.page.title = new_title;
+}
+
 static void print_object(const unsigned char *sha1, char *path, const char *basename, const char *rev)
 {
 	enum object_type type;
@@ -93,16 +123,21 @@ static void print_object(const unsigned char *sha1, char *path, const char *base
 
 	type = sha1_object_info(sha1, &size);
 	if (type == OBJ_BAD) {
-		cgit_print_error("Bad object name: %s", sha1_to_hex(sha1));
+		cgit_print_error_page(404, "Not found",
+			"Bad object name: %s", sha1_to_hex(sha1));
 		return;
 	}
 
 	buf = read_sha1_file(sha1, &type, &size);
 	if (!buf) {
-		cgit_print_error("Error reading object %s", sha1_to_hex(sha1));
+		cgit_print_error_page(500, "Internal server error",
+			"Error reading object %s", sha1_to_hex(sha1));
 		return;
 	}
 
+	set_title_from_path(path);
+
+	cgit_print_layout_start();
 	htmlf("blob: %s (", sha1_to_hex(sha1));
 	cgit_plain_link("plain", NULL, NULL, ctx.qry.head,
 		        rev, path);
@@ -141,6 +176,7 @@ static int ls_item(const unsigned char *sha1, struct strbuf *base,
 			htmlf("<tr><td colspan='3'>Bad object: %s %s</td></tr>",
 			      name,
 			      sha1_to_hex(sha1));
+			free(name);
 			return 0;
 		}
 	}
@@ -166,7 +202,7 @@ static int ls_item(const unsigned char *sha1, struct strbuf *base,
 	html("<td>");
 	cgit_log_link("log", NULL, "button", ctx.qry.head,
 		      walk_tree_ctx->curr_rev, fullpath.buf, 0, NULL, NULL,
-		      ctx.qry.showmsg);
+		      ctx.qry.showmsg, 0);
 	if (ctx.repo->max_stats)
 		cgit_stats_link("stats", NULL, "button", ctx.qry.head,
 				fullpath.buf);
@@ -182,6 +218,7 @@ static int ls_item(const unsigned char *sha1, struct strbuf *base,
 
 static void ls_head(void)
 {
+	cgit_print_layout_start();
 	html("<table summary='tree listing' class='list'>\n");
 	html("<tr class='nohover'>");
 	html("<th class='left'>Mode</th>");
@@ -194,6 +231,7 @@ static void ls_head(void)
 static void ls_tail(void)
 {
 	html("</table>\n");
+	cgit_print_layout_end();
 }
 
 static void ls_tree(const unsigned char *sha1, char *path, struct walk_tree_context *walk_tree_ctx)
@@ -205,7 +243,8 @@ static void ls_tree(const unsigned char *sha1, char *path, struct walk_tree_cont
 
 	tree = parse_tree_indirect(sha1);
 	if (!tree) {
-		cgit_print_error("Not a tree object: %s", sha1_to_hex(sha1));
+		cgit_print_error_page(404, "Not found",
+			"Not a tree object: %s", sha1_to_hex(sha1));
 		return;
 	}
 
@@ -229,9 +268,11 @@ static int walk_tree(const unsigned char *sha1, struct strbuf *base,
 
 		if (S_ISDIR(mode)) {
 			walk_tree_ctx->state = 1;
+			set_title_from_path(buffer);
 			ls_head();
 			return READ_TREE_RECURSIVE;
 		} else {
+			walk_tree_ctx->state = 2;
 			print_object(sha1, buffer, pathname, walk_tree_ctx->curr_rev);
 			return 0;
 		}
@@ -266,25 +307,31 @@ void cgit_print_tree(const char *rev, char *path)
 		rev = ctx.qry.head;
 
 	if (get_sha1(rev, sha1)) {
-		cgit_print_error("Invalid revision name: %s", rev);
+		cgit_print_error_page(404, "Not found",
+			"Invalid revision name: %s", rev);
 		return;
 	}
 	commit = lookup_commit_reference(sha1);
 	if (!commit || parse_commit(commit)) {
-		cgit_print_error("Invalid commit reference: %s", rev);
+		cgit_print_error_page(404, "Not found",
+			"Invalid commit reference: %s", rev);
 		return;
 	}
 
 	walk_tree_ctx.curr_rev = xstrdup(rev);
 
 	if (path == NULL) {
-		ls_tree(commit->tree->object.sha1, NULL, &walk_tree_ctx);
+		ls_tree(commit->tree->object.oid.hash, NULL, &walk_tree_ctx);
 		goto cleanup;
 	}
 
 	read_tree_recursive(commit->tree, "", 0, 0, &paths, walk_tree, &walk_tree_ctx);
 	if (walk_tree_ctx.state == 1)
 		ls_tail();
+	else if (walk_tree_ctx.state == 2)
+		cgit_print_layout_end();
+	else
+		cgit_print_error_page(404, "Not found", "Path not found");
 
 cleanup:
 	free(walk_tree_ctx.curr_rev);

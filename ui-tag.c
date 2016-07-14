@@ -52,27 +52,32 @@ void cgit_print_tag(char *revname)
 
 	strbuf_addf(&fullref, "refs/tags/%s", revname);
 	if (get_sha1(fullref.buf, sha1)) {
-		cgit_print_error("Bad tag reference: %s", revname);
+		cgit_print_error_page(404, "Not found",
+			"Bad tag reference: %s", revname);
 		goto cleanup;
 	}
 	obj = parse_object(sha1);
 	if (!obj) {
-		cgit_print_error("Bad object id: %s", sha1_to_hex(sha1));
+		cgit_print_error_page(500, "Internal server error",
+			"Bad object id: %s", sha1_to_hex(sha1));
 		goto cleanup;
 	}
 	if (obj->type == OBJ_TAG) {
 		tag = lookup_tag(sha1);
 		if (!tag || parse_tag(tag) || !(info = cgit_parse_tag(tag))) {
-			cgit_print_error("Bad tag object: %s", revname);
+			cgit_print_error_page(500, "Internal server error",
+				"Bad tag object: %s", revname);
 			goto cleanup;
 		}
+		cgit_print_layout_start();
 		html("<table class='commit-info'>\n");
 		htmlf("<tr><td>tag name</td><td>");
 		html_txt(revname);
 		htmlf(" (%s)</td></tr>\n", sha1_to_hex(sha1));
 		if (info->tagger_date > 0) {
 			html("<tr><td>tag date</td><td>");
-			cgit_print_date(info->tagger_date, FMT_LONGDATE, ctx.cfg.local_time);
+			html_txt(show_date(info->tagger_date, info->tagger_tz,
+						cgit_date_mode(DATE_ISO8601)));
 			html("</td></tr>\n");
 		}
 		if (info->tagger) {
@@ -93,7 +98,9 @@ void cgit_print_tag(char *revname)
 			print_download_links(revname);
 		html("</table>\n");
 		print_tag_content(info->msg);
+		cgit_print_layout_end();
 	} else {
+		cgit_print_layout_start();
 		html("<table class='commit-info'>\n");
 		htmlf("<tr><td>tag name</td><td>");
 		html_txt(revname);
@@ -104,6 +111,7 @@ void cgit_print_tag(char *revname)
 		if (ctx.repo->snapshots)
 			print_download_links(revname);
 		html("</table>\n");
+		cgit_print_layout_end();
 	}
 
 cleanup:

@@ -63,7 +63,7 @@ static int print_branch(struct refinfo *ref)
 		return 1;
 	html("<tr><td>");
 	cgit_log_link(name, NULL, NULL, name, NULL, NULL, 0, NULL, NULL,
-		      ctx.qry.showmsg);
+		      ctx.qry.showmsg, 0);
 	html("</td><td>");
 
 	if (ref->object->type == OBJ_COMMIT) {
@@ -73,7 +73,7 @@ static int print_branch(struct refinfo *ref)
 		html_txt(info->author);
 		cgit_close_filter(ctx.repo->email_filter);
 		html("</td><td colspan='2'>");
-		cgit_print_age(info->commit->date, -1, NULL);
+		cgit_print_age(info->committer_date, info->committer_tz, -1);
 	} else {
 		html("</td><td></td><td>");
 		cgit_object_link(ref->object);
@@ -135,7 +135,7 @@ static int print_tag(struct refinfo *ref)
 		tag = (struct tag *)obj;
 		obj = tag->tagged;
 		info = ref->tag;
-		if (!tag || !info)
+		if (!info)
 			return 1;
 	}
 
@@ -161,9 +161,9 @@ static int print_tag(struct refinfo *ref)
 	html("</td><td colspan='2'>");
 	if (info) {
 		if (info->tagger_date > 0)
-			cgit_print_age(info->tagger_date, -1, NULL);
+			cgit_print_age(info->tagger_date, info->tagger_tz, -1);
 	} else if (ref->object->type == OBJ_COMMIT) {
-		cgit_print_age(ref->commit->commit->date, -1, NULL);
+		cgit_print_age(ref->commit->commit->date, 0, -1);
 	}
 	html("</td></tr>\n");
 
@@ -236,7 +236,7 @@ void cgit_print_tags(int maxcount)
 
 void cgit_print_refs(void)
 {
-
+	cgit_print_layout_start();
 	html("<table class='list nowrap'>");
 
 	if (ctx.qry.path && starts_with(ctx.qry.path, "heads"))
@@ -249,4 +249,5 @@ void cgit_print_refs(void)
 		cgit_print_tags(0);
 	}
 	html("</table>");
+	cgit_print_layout_end();
 }

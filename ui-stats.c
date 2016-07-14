@@ -196,6 +196,7 @@ static void add_commit(struct string_list *authors, struct commit *commit,
 	char *tmp;
 	struct tm *date;
 	time_t t;
+	uintptr_t *counter;
 
 	info = cgit_parse_commit(commit);
 	tmp = xstrdup(info->author);
@@ -211,9 +212,11 @@ static void add_commit(struct string_list *authors, struct commit *commit,
 	period->trunc(date);
 	tmp = xstrdup(period->pretty(date));
 	item = string_list_insert(items, tmp);
-	if (item->util)
+	counter = (uintptr_t *)&item->util;
+	if (*counter)
 		free(tmp);
-	item->util++;
+	(*counter)++;
+
 	authorstat->total++;
 	cgit_free_commitinfo(info);
 }
@@ -308,7 +311,7 @@ static void print_combined_authorrow(struct string_list *authors, int from,
 			items = &authorstat->list;
 			date = string_list_lookup(items, tmp);
 			if (date)
-				subtotal += (size_t)date->util;
+				subtotal += (uintptr_t)date->util;
 		}
 		htmlf("<td class='%s'>%ld</td>", centerclass, subtotal);
 		total += subtotal;
@@ -362,8 +365,8 @@ static void print_authors(struct string_list *authors, int top,
 			if (!date)
 				html("<td>0</td>");
 			else {
-				htmlf("<td>"SZ_FMT"</td>", (size_t)date->util);
-				total += (size_t)date->util;
+				htmlf("<td>%lu</td>", (uintptr_t)date->util);
+				total += (uintptr_t)date->util;
 			}
 		}
 		htmlf("<td class='sum'>%ld</td></tr>", total);
@@ -394,11 +397,13 @@ void cgit_show_stats(void)
 
 	i = cgit_find_stats_period(code, &period);
 	if (!i) {
-		cgit_print_error("Unknown statistics type: %c", code[0]);
+		cgit_print_error_page(404, "Not found",
+			"Unknown statistics type: %c", code[0]);
 		return;
 	}
 	if (i > ctx.repo->max_stats) {
-		cgit_print_error("Statistics type disabled: %s", period->name);
+		cgit_print_error_page(400, "Bad request",
+			"Statistics type disabled: %s", period->name);
 		return;
 	}
 	authors = collect_stats(period);
@@ -409,9 +414,10 @@ void cgit_show_stats(void)
 	if (!top)
 		top = 10;
 
+	cgit_print_layout_start();
 	html("<div class='cgit-panel'>");
 	html("<b>stat options</b>");
-	html("<form method='get' action=''>");
+	html("<form method='get'>");
 	cgit_add_hidden_formfields(1, 0, "stats");
 	html("<table><tr><td colspan='2'/></tr>");
 	if (ctx.repo->max_stats > 1) {
@@ -443,5 +449,6 @@ void cgit_show_stats(void)
 	}
 	html("</h2>");
 	print_authors(&authors, top, period);
+	cgit_print_layout_end();
 }
 

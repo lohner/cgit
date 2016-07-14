@@ -3,6 +3,8 @@
 
 
 #include <git-compat-util.h>
+#include <stdbool.h>
+
 #include <cache.h>
 #include <grep.h>
 #include <object.h>
@@ -23,13 +25,9 @@
 #include <notes.h>
 #include <graph.h>
 
-
-/*
- * Dateformats used on misc. pages
- */
-#define FMT_LONGDATE "%Y-%m-%d %H:%M:%S (%Z)"
-#define FMT_SHORTDATE "%Y-%m-%d"
-#define FMT_ATOMDATE "%Y-%m-%dT%H:%M:%SZ"
+/* Add isgraph(x) to Git's sane ctype support (see git-compat-util.h) */
+#undef isgraph
+#define isgraph(x) (isprint((x)) && !isspace((x)))
 
 
 /*
@@ -83,6 +81,7 @@ struct cgit_repo {
 	char *path;
 	char *desc;
 	char *owner;
+	char *homepage;
 	char *defbranch;
 	char *module_link;
 	struct string_list readme;
@@ -97,6 +96,7 @@ struct cgit_repo {
 	int enable_log_linecount;
 	int enable_remote_branches;
 	int enable_subject_links;
+	int enable_html_serving;
 	int max_stats;
 	int branch_sort;
 	int commit_sort;
@@ -125,9 +125,11 @@ struct commitinfo {
 	char *author;
 	char *author_email;
 	unsigned long author_date;
+	int author_tz;
 	char *committer;
 	char *committer_email;
 	unsigned long committer_date;
+	int committer_tz;
 	char *subject;
 	char *msg;
 	char *msg_encoding;
@@ -137,6 +139,7 @@ struct taginfo {
 	char *tagger;
 	char *tagger_email;
 	unsigned long tagger_date;
+	int tagger_tz;
 	char *msg;
 };
 
@@ -169,7 +172,6 @@ struct cgit_query {
 	char *sha2;
 	char *path;
 	char *name;
-	char *mimetype;
 	char *url;
 	char *period;
 	int   ofs;
@@ -180,6 +182,7 @@ struct cgit_query {
 	int show_all;
 	int context;
 	int ignorews;
+	int follow;
 	char *vpath;
 };
 
@@ -223,6 +226,7 @@ struct cgit_config {
 	int embedded;
 	int enable_atom_diff;
 	int enable_filter_overrides;
+	int enable_follow_links;
 	int enable_http_clone;
 	int enable_index_links;
 	int enable_index_owner;
@@ -231,6 +235,7 @@ struct cgit_config {
 	int enable_log_linecount;
 	int enable_remote_branches;
 	int enable_subject_links;
+	int enable_html_serving;
 	int enable_tree_linenumbers;
 	int enable_git_config;
 	int local_time;
@@ -337,10 +342,13 @@ extern void strbuf_ensure_end(struct strbuf *sb, char c);
 
 extern void cgit_add_ref(struct reflist *list, struct refinfo *ref);
 extern void cgit_free_reflist_inner(struct reflist *list);
-extern int cgit_refs_cb(const char *refname, const unsigned char *sha1,
+extern int cgit_refs_cb(const char *refname, const struct object_id *oid,
 			int flags, void *cb_data);
 
 extern void *cgit_free_commitinfo(struct commitinfo *info);
+
+void cgit_diff_tree_cb(struct diff_queue_struct *q,
+		       struct diff_options *options, void *data);
 
 extern int cgit_diff_files(const unsigned char *old_sha1,
 			   const unsigned char *new_sha1,
@@ -382,5 +390,7 @@ extern void cgit_prepare_repo_env(struct cgit_repo * repo);
 extern int readfile(const char *path, char **buf, size_t *size);
 
 extern char *expand_macros(const char *txt);
+
+extern char *get_mimetype_for_filename(const char *filename);
 
 #endif /* CGIT_H */

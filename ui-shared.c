@@ -12,8 +12,7 @@
 #include "html.h"
 
 static const char cgit_doctype[] =
-"<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\"\n"
-"  \"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">\n";
+"<!DOCTYPE html>\n";
 
 static char *http_date(time_t t)
 {
@@ -54,21 +53,21 @@ const char *cgit_httpscheme(void)
 		return "http://";
 }
 
-const char *cgit_hosturl(void)
+char *cgit_hosturl(void)
 {
 	if (ctx.env.http_host)
-		return ctx.env.http_host;
+		return xstrdup(ctx.env.http_host);
 	if (!ctx.env.server_name)
 		return NULL;
 	if (!ctx.env.server_port || atoi(ctx.env.server_port) == 80)
-		return ctx.env.server_name;
+		return xstrdup(ctx.env.server_name);
 	return fmtalloc("%s:%s", ctx.env.server_name, ctx.env.server_port);
 }
 
-const char *cgit_currenturl(void)
+char *cgit_currenturl(void)
 {
 	if (!ctx.qry.url)
-		return cgit_rooturl();
+		return xstrdup(cgit_rooturl());
 	const char *root = cgit_rooturl();
 	size_t len = strlen(root);
 	if (len && root[len - 1] == '/')
@@ -157,8 +156,11 @@ static void site_url(const char *page, const char *search, const char *sort, int
 
 	if (always_root || page)
 		html_attr(cgit_rooturl());
-	else
-		html_attr(cgit_currenturl());
+	else {
+		char *currenturl = cgit_currenturl();
+		html_attr(currenturl);
+		free(currenturl);
+	}
 
 	if (page) {
 		htmlf("?p=%s", page);
@@ -303,7 +305,8 @@ void cgit_plain_link(const char *name, const char *title, const char *class,
 
 void cgit_log_link(const char *name, const char *title, const char *class,
 		   const char *head, const char *rev, const char *path,
-		   int ofs, const char *grep, const char *pattern, int showmsg)
+		   int ofs, const char *grep, const char *pattern, int showmsg,
+		   int follow)
 {
 	char *delim;
 
@@ -332,6 +335,11 @@ void cgit_log_link(const char *name, const char *title, const char *class,
 	if (showmsg) {
 		html(delim);
 		html("showmsg=1");
+		delim = "&amp;";
+	}
+	if (follow) {
+		html(delim);
+		html("follow=1");
 	}
 	html("'>");
 	html_txt(name);
@@ -372,6 +380,10 @@ void cgit_commit_link(char *name, const char *title, const char *class,
 		html(delim);
 		html("ignorews=1");
 		delim = "&amp;";
+	}
+	if (ctx.qry.follow) {
+		html(delim);
+		html("follow=1");
 	}
 	html("'>");
 	if (name[0] != '\0')
@@ -429,6 +441,10 @@ void cgit_diff_link(const char *name, const char *title, const char *class,
 		html("ignorews=1");
 		delim = "&amp;";
 	}
+	if (ctx.qry.follow) {
+		html(delim);
+		html("follow=1");
+	}
 	html("'>");
 	html_txt(name);
 	html("</a>");
@@ -469,7 +485,7 @@ static void cgit_self_link(char *name, const char *title, const char *class)
 			      ctx.qry.has_sha1 ? ctx.qry.sha1 : NULL,
 			      ctx.qry.path, ctx.qry.ofs,
 			      ctx.qry.grep, ctx.qry.search,
-			      ctx.qry.showmsg);
+			      ctx.qry.showmsg, ctx.qry.follow);
 	else if (!strcmp(ctx.qry.page, "commit"))
 		cgit_commit_link(name, title, class, ctx.qry.head,
 				 ctx.qry.has_sha1 ? ctx.qry.sha1 : NULL,
@@ -513,7 +529,7 @@ void cgit_object_link(struct object *obj)
 {
 	char *page, *shortrev, *fullrev, *name;
 
-	fullrev = sha1_to_hex(obj->sha1);
+	fullrev = oid_to_hex(&obj->oid);
 	shortrev = xstrdup(fullrev);
 	shortrev[10] = '\0';
 	if (obj->type == OBJ_COMMIT) {
@@ -595,39 +611,23 @@ void cgit_submodule_link(const char *class, char *path, const char *rev)
 		path[len - 1] = tail;
 }
 
-void cgit_print_date(time_t secs, const char *format, int local_time)
+const struct date_mode *cgit_date_mode(enum date_mode_type type)
 {
-	char buf[64];
-	struct tm *time;
-
-	if (!secs)
-		return;
-	if (local_time)
-		time = localtime(&secs);
-	else
-		time = gmtime(&secs);
-	strftime(buf, sizeof(buf)-1, format, time);
-	html_txt(buf);
+	static struct date_mode mode;
+	mode.type = type;
+	mode.local = ctx.cfg.local_time;
+	return &mode;
 }
 
-static void print_rel_date(time_t t, double value,
+static void print_rel_date(time_t t, int tz, double value,
 	const char *class, const char *suffix)
 {
-	char buf[64];
-	struct tm *time;
-
-	if (ctx.cfg.local_time)
-		time = localtime(&t);
-	else
-		time = gmtime(&t);
-	strftime(buf, sizeof(buf) - 1, FMT_LONGDATE, time);
-
 	htmlf("<span class='%s' title='", class);
-	html_attr(buf);
+	html_attr(show_date(t, tz, cgit_date_mode(DATE_ISO8601)));
 	htmlf("'>%.0f %s</span>", value, suffix);
 }
 
-void cgit_print_age(time_t t, time_t max_relative, const char *format)
+void cgit_print_age(time_t t, int tz, time_t max_relative)
 {
 	time_t now, secs;
 
@@ -639,31 +639,35 @@ void cgit_print_age(time_t t, time_t max_relative, const char *format)
 		secs = 0;
 
 	if (secs > max_relative && max_relative >= 0) {
-		cgit_print_date(t, format, ctx.cfg.local_time);
+		html("<span title='");
+		html_attr(show_date(t, tz, cgit_date_mode(DATE_ISO8601)));
+		html("'>");
+		html_txt(show_date(t, tz, cgit_date_mode(DATE_SHORT)));
+		html("</span>");
 		return;
 	}
 
 	if (secs < TM_HOUR * 2) {
-		print_rel_date(t, secs * 1.0 / TM_MIN, "age-mins", "min.");
+		print_rel_date(t, tz, secs * 1.0 / TM_MIN, "age-mins", "min.");
 		return;
 	}
 	if (secs < TM_DAY * 2) {
-		print_rel_date(t, secs * 1.0 / TM_HOUR, "age-hours", "hours");
+		print_rel_date(t, tz, secs * 1.0 / TM_HOUR, "age-hours", "hours");
 		return;
 	}
 	if (secs < TM_WEEK * 2) {
-		print_rel_date(t, secs * 1.0 / TM_DAY, "age-days", "days");
+		print_rel_date(t, tz, secs * 1.0 / TM_DAY, "age-days", "days");
 		return;
 	}
 	if (secs < TM_MONTH * 2) {
-		print_rel_date(t, secs * 1.0 / TM_WEEK, "age-weeks", "weeks");
+		print_rel_date(t, tz, secs * 1.0 / TM_WEEK, "age-weeks", "weeks");
 		return;
 	}
 	if (secs < TM_YEAR * 2) {
-		print_rel_date(t, secs * 1.0 / TM_MONTH, "age-months", "months");
+		print_rel_date(t, tz, secs * 1.0 / TM_MONTH, "age-months", "months");
 		return;
 	}
-	print_rel_date(t, secs * 1.0 / TM_YEAR, "age-years", "years");
+	print_rel_date(t, tz, secs * 1.0 / TM_YEAR, "age-years", "years");
 }
 
 void cgit_print_http_headers(void)
@@ -680,9 +684,11 @@ void cgit_print_http_headers(void)
 		htmlf("Content-Type: %s\n", ctx.page.mimetype);
 	if (ctx.page.size)
 		htmlf("Content-Length: %zd\n", ctx.page.size);
-	if (ctx.page.filename)
-		htmlf("Content-Disposition: inline; filename=\"%s\"\n",
-		      ctx.page.filename);
+	if (ctx.page.filename) {
+		html("Content-Disposition: inline; filename=\"");
+		html_header_arg_in_quotes(ctx.page.filename);
+		html("\"\n");
+	}
 	if (!ctx.env.authenticated)
 		html("Cache-Control: no-cache, no-store\n");
 	htmlf("Last-Modified: %s\n", http_date(ctx.page.modified));
@@ -692,6 +698,14 @@ void cgit_print_http_headers(void)
 	html("\n");
 	if (ctx.env.request_method && !strcmp(ctx.env.request_method, "HEAD"))
 		exit(0);
+}
+
+void cgit_redirect(const char *url, bool permanent)
+{
+	htmlf("Status: %d %s\n", permanent ? 301 : 302, permanent ? "Moved" : "Found");
+	html("Location: ");
+	html_url_path(url);
+	html("\n\n");
 }
 
 static void print_rel_vcs_link(const char *url)
@@ -711,9 +725,9 @@ void cgit_print_docstart(void)
 		return;
 	}
 
-	const char *host = cgit_hosturl();
+	char *host = cgit_hosturl();
 	html(cgit_doctype);
-	html("<html xmlns='http://www.w3.org/1999/xhtml' xml:lang='en' lang='en'>\n");
+	html("<html lang='en'>\n");
 	html("<head>\n");
 	html("<title>");
 	html_txt(ctx.page.title);
@@ -730,16 +744,19 @@ void cgit_print_docstart(void)
 		html("'/>\n");
 	}
 	if (host && ctx.repo && ctx.qry.head) {
+		char *fileurl;
 		struct strbuf sb = STRBUF_INIT;
 		strbuf_addf(&sb, "h=%s", ctx.qry.head);
 
 		html("<link rel='alternate' title='Atom feed' href='");
 		html(cgit_httpscheme());
-		html_attr(cgit_hosturl());
-		html_attr(cgit_fileurl(ctx.repo->url, "atom", ctx.qry.vpath,
-				       sb.buf));
+		html_attr(host);
+		fileurl = cgit_fileurl(ctx.repo->url, "atom", ctx.qry.vpath,
+				       sb.buf);
+		html_attr(fileurl);
 		html("' type='application/atom+xml'/>\n");
 		strbuf_release(&sb);
+		free(fileurl);
 	}
 	if (ctx.repo)
 		cgit_add_clone_urls(print_rel_vcs_link);
@@ -749,6 +766,7 @@ void cgit_print_docstart(void)
 	html("<body>\n");
 	if (ctx.cfg.header)
 		html_include(ctx.cfg.header);
+	free(host);
 }
 
 void cgit_print_docend(void)
@@ -765,11 +783,36 @@ void cgit_print_docend(void)
 	else {
 		htmlf("<div class='footer'>generated by <a href='http://git.zx2c4.com/cgit/about/'>cgit %s</a> at ",
 			cgit_version);
-		cgit_print_date(time(NULL), FMT_LONGDATE, ctx.cfg.local_time);
+		html_txt(show_date(time(NULL), 0, cgit_date_mode(DATE_ISO8601)));
 		html("</div>\n");
 	}
 	html("</div> <!-- id=cgit -->\n");
 	html("</body>\n</html>\n");
+}
+
+void cgit_print_error_page(int code, const char *msg, const char *fmt, ...)
+{
+	va_list ap;
+	ctx.page.expires = ctx.cfg.cache_dynamic_ttl;
+	ctx.page.status = code;
+	ctx.page.statusmsg = msg;
+	cgit_print_layout_start();
+	va_start(ap, fmt);
+	cgit_vprint_error(fmt, ap);
+	va_end(ap);
+	cgit_print_layout_end();
+}
+
+void cgit_print_layout_start(void)
+{
+	cgit_print_http_headers();
+	cgit_print_docstart();
+	cgit_print_pageheader();
+}
+
+void cgit_print_layout_end(void)
+{
+	cgit_print_docend();
 }
 
 static void add_clone_urls(void (*fn)(const char *), char *txt, char *suffix)
@@ -797,7 +840,7 @@ void cgit_add_clone_urls(void (*fn)(const char *))
 		add_clone_urls(fn, ctx.cfg.clone_prefix, ctx.repo->url);
 }
 
-static int print_branch_option(const char *refname, const unsigned char *sha1,
+static int print_branch_option(const char *refname, const struct object_id *oid,
 			       int flags, void *cb_data)
 {
 	char *name = (char *)refname;
@@ -839,6 +882,9 @@ void cgit_add_hidden_formfields(int incl_head, int incl_search,
 
 static const char *hc(const char *page)
 {
+	if (!ctx.qry.page)
+		return NULL;
+
 	return strcmp(ctx.qry.page, page) ? NULL : "active";
 }
 
@@ -896,14 +942,14 @@ static void print_header(void)
 		cgit_summary_link(ctx.repo->name, ctx.repo->name, NULL, NULL);
 		if (ctx.env.authenticated) {
 			html("</td><td class='form'>");
-			html("<form method='get' action=''>\n");
+			html("<form method='get'>\n");
 			cgit_add_hidden_formfields(0, 1, ctx.qry.page);
 			html("<select name='h' onchange='this.form.submit();'>\n");
 			for_each_branch_ref(print_branch_option, ctx.qry.head);
 			if (ctx.repo->enable_remote_branches)
 				for_each_remote_ref(print_branch_option, ctx.qry.head);
 			html("</select> ");
-			html("<input type='submit' name='' value='switch'/>");
+			html("<input type='submit' value='switch'/>");
 			html("</form>");
 		}
 	} else
@@ -942,7 +988,7 @@ void cgit_print_pageheader(void)
 			       ctx.qry.sha1, NULL);
 		cgit_log_link("log", NULL, hc("log"), ctx.qry.head,
 			      NULL, ctx.qry.vpath, 0, NULL, NULL,
-			      ctx.qry.showmsg);
+			      ctx.qry.showmsg, ctx.qry.follow);
 		cgit_tree_link("tree", NULL, hc("tree"), ctx.qry.head,
 			       ctx.qry.sha1, ctx.qry.vpath);
 		cgit_commit_link("commit", NULL, hc("commit"),
@@ -952,11 +998,19 @@ void cgit_print_pageheader(void)
 		if (ctx.repo->max_stats)
 			cgit_stats_link("stats", NULL, hc("stats"),
 					ctx.qry.head, ctx.qry.vpath);
+		if (ctx.repo->homepage) {
+			html("<a href='");
+			html_attr(ctx.repo->homepage);
+			html("'>homepage</a>");
+		}
 		html("</td><td class='form'>");
 		html("<form class='right' method='get' action='");
-		if (ctx.cfg.virtual_root)
-			html_url_path(cgit_fileurl(ctx.qry.repo, "log",
-						   ctx.qry.vpath, NULL));
+		if (ctx.cfg.virtual_root) {
+			char *fileurl = cgit_fileurl(ctx.qry.repo, "log",
+						   ctx.qry.vpath, NULL);
+			html_url_path(fileurl);
+			free(fileurl);
+		}
 		html("'>\n");
 		cgit_add_hidden_formfields(1, 0, "log");
 		html("<select name='qt'>\n");
@@ -971,25 +1025,35 @@ void cgit_print_pageheader(void)
 		html("<input type='submit' value='search'/>\n");
 		html("</form>\n");
 	} else if (ctx.env.authenticated) {
+		char *currenturl = cgit_currenturl();
 		site_link(NULL, "index", NULL, hc("repolist"), NULL, NULL, 0, 1);
 		if (ctx.cfg.root_readme)
 			site_link("about", "about", NULL, hc("about"),
 				  NULL, NULL, 0, 1);
 		html("</td><td class='form'>");
 		html("<form method='get' action='");
-		html_attr(cgit_currenturl());
+		html_attr(currenturl);
 		html("'>\n");
 		html("<input type='text' name='q' size='10' value='");
 		html_attr(ctx.qry.search);
 		html("'/>\n");
 		html("<input type='submit' value='search'/>\n");
 		html("</form>");
+		free(currenturl);
 	}
 	html("</td></tr></table>\n");
 	if (ctx.env.authenticated && ctx.qry.vpath) {
 		html("<div class='path'>");
 		html("path: ");
 		cgit_print_path_crumbs(ctx.qry.vpath);
+		if (ctx.cfg.enable_follow_links && !strcmp(ctx.qry.page, "log")) {
+			html(" (");
+			ctx.qry.follow = !ctx.qry.follow;
+			cgit_self_link(ctx.qry.follow ? "follow" : "unfollow",
+					NULL, NULL);
+			ctx.qry.follow = !ctx.qry.follow;
+			html(")");
+		}
 		html("</div>");
 	}
 	html("<div class='content'>");

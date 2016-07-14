@@ -41,6 +41,8 @@ static void repo_config(struct cgit_repo *repo, const char *name, const char *va
 		repo->desc = xstrdup(value);
 	else if (!strcmp(name, "owner"))
 		repo->owner = xstrdup(value);
+	else if (!strcmp(name, "homepage"))
+		repo->homepage = xstrdup(value);
 	else if (!strcmp(name, "defbranch"))
 		repo->defbranch = xstrdup(value);
 	else if (!strcmp(name, "snapshots"))
@@ -57,6 +59,8 @@ static void repo_config(struct cgit_repo *repo, const char *name, const char *va
 		repo->enable_remote_branches = atoi(value);
 	else if (!strcmp(name, "enable-subject-links"))
 		repo->enable_subject_links = atoi(value);
+	else if (!strcmp(name, "enable-html-serving"))
+		repo->enable_html_serving = atoi(value);
 	else if (!strcmp(name, "branch-sort")) {
 		if (!strcmp(value, "age"))
 			repo->branch_sort = 1;
@@ -84,6 +88,10 @@ static void repo_config(struct cgit_repo *repo, const char *name, const char *va
 		repo->logo = xstrdup(value);
 	else if (!strcmp(name, "logo-link") && value != NULL)
 		repo->logo_link = xstrdup(value);
+	else if (!strcmp(name, "hide"))
+		repo->hide = atoi(value);
+	else if (!strcmp(name, "ignore"))
+		repo->ignore = atoi(value);
 	else if (ctx.cfg.enable_filter_overrides) {
 		if (!strcmp(name, "about-filter"))
 			repo->about_filter = cgit_new_filter(value, ABOUT);
@@ -95,10 +103,6 @@ static void repo_config(struct cgit_repo *repo, const char *name, const char *va
 			repo->email_filter = cgit_new_filter(value, EMAIL);
 		else if (!strcmp(name, "owner-filter"))
 			repo->owner_filter = cgit_new_filter(value, OWNER);
-	} else if (!strcmp(name, "hide")) {
-		repo->hide = atoi(value);
-	} else if (!strcmp(name, "ignore")) {
-		repo->ignore = atoi(value);
 	}
 }
 
@@ -112,7 +116,7 @@ static void config_cb(const char *name, const char *value)
 		ctx.repo->path = trim_end(value, '/');
 	else if (ctx.repo && starts_with(name, "repo."))
 		repo_config(ctx.repo, name + 5, value);
-	else if (!strcmp(name, "readme") && value != NULL)
+	else if (!strcmp(name, "readme"))
 		string_list_append(&ctx.cfg.readme, xstrdup(value));
 	else if (!strcmp(name, "root-title"))
 		ctx.cfg.root_title = xstrdup(value);
@@ -156,6 +160,8 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.enable_atom_diff = atoi(value);
 	else if (!strcmp(name, "enable-filter-overrides"))
 		ctx.cfg.enable_filter_overrides = atoi(value);
+	else if (!strcmp(name, "enable-follow-links"))
+		ctx.cfg.enable_follow_links = atoi(value);
 	else if (!strcmp(name, "enable-http-clone"))
 		ctx.cfg.enable_http_clone = atoi(value);
 	else if (!strcmp(name, "enable-index-links"))
@@ -172,6 +178,8 @@ static void config_cb(const char *name, const char *value)
 		ctx.cfg.enable_remote_branches = atoi(value);
 	else if (!strcmp(name, "enable-subject-links"))
 		ctx.cfg.enable_subject_links = atoi(value);
+	else if (!strcmp(name, "enable-html-serving"))
+		ctx.cfg.enable_html_serving = atoi(value);
 	else if (!strcmp(name, "enable-tree-linenumbers"))
 		ctx.cfg.enable_tree_linenumbers = atoi(value);
 	else if (!strcmp(name, "enable-git-config"))
@@ -316,8 +324,6 @@ static void querystring_cb(const char *name, const char *value)
 		ctx.qry.path = trim_end(value, '/');
 	} else if (!strcmp(name, "name")) {
 		ctx.qry.name = xstrdup(value);
-	} else if (!strcmp(name, "mimetype")) {
-		ctx.qry.mimetype = xstrdup(value);
 	} else if (!strcmp(name, "s")) {
 		ctx.qry.sort = xstrdup(value);
 	} else if (!strcmp(name, "showmsg")) {
@@ -337,6 +343,8 @@ static void querystring_cb(const char *name, const char *value)
 		ctx.qry.context = atoi(value);
 	} else if (!strcmp(name, "ignorews")) {
 		ctx.qry.ignorews = atoi(value);
+	} else if (!strcmp(name, "follow")) {
+		ctx.qry.follow = atoi(value);
 	}
 }
 
@@ -426,7 +434,7 @@ struct refmatch {
 	int match;
 };
 
-static int find_current_ref(const char *refname, const unsigned char *sha1,
+static int find_current_ref(const char *refname, const struct object_id *oid,
 			    int flags, void *cb_data)
 {
 	struct refmatch *info;
@@ -615,13 +623,8 @@ static int prepare_repo_cmd(void)
 	if (get_sha1(ctx.qry.head, sha1)) {
 		char *tmp = xstrdup(ctx.qry.head);
 		ctx.qry.head = ctx.repo->defbranch;
-		ctx.page.status = 404;
-		ctx.page.statusmsg = "Not found";
-		cgit_print_http_headers();
-		cgit_print_docstart();
-		cgit_print_pageheader();
-		cgit_print_error("Invalid branch: %s", tmp);
-		cgit_print_docend();
+		cgit_print_error_page(404, "Not found",
+				"Invalid branch: %s", tmp);
 		free(tmp);
 		return 1;
 	}
@@ -657,7 +660,7 @@ static inline void open_auth_filter(const char *function)
 static inline void authenticate_post(void)
 {
 	char buffer[MAX_AUTHENTICATION_POST_BYTES];
-	int len;
+	unsigned int len;
 
 	open_auth_filter("authenticate-post");
 	len = ctx.env.content_length;
@@ -714,18 +717,13 @@ static void process_request(void)
 	cmd = cgit_get_cmd();
 	if (!cmd) {
 		ctx.page.title = "cgit error";
-		ctx.page.status = 404;
-		ctx.page.statusmsg = "Not found";
-		cgit_print_http_headers();
-		cgit_print_docstart();
-		cgit_print_pageheader();
-		cgit_print_error("Invalid request");
-		cgit_print_docend();
+		cgit_print_error_page(404, "Not found", "Invalid request");
 		return;
 	}
 
 	if (!ctx.cfg.enable_http_clone && cmd->is_clone) {
-		html_status(404, "Not found", 0);
+		ctx.page.title = "cgit error";
+		cgit_print_error_page(404, "Not found", "Invalid request");
 		return;
 	}
 
@@ -736,27 +734,15 @@ static void process_request(void)
 	ctx.qry.vpath = cmd->want_vpath ? ctx.qry.path : NULL;
 
 	if (cmd->want_repo && !ctx.repo) {
-		cgit_print_http_headers();
-		cgit_print_docstart();
-		cgit_print_pageheader();
-		cgit_print_error("No repository selected");
-		cgit_print_docend();
+		cgit_print_error_page(400, "Bad request",
+				"No repository selected");
 		return;
 	}
 
 	if (ctx.repo && prepare_repo_cmd())
 		return;
 
-	if (cmd->want_layout) {
-		cgit_print_http_headers();
-		cgit_print_docstart();
-		cgit_print_pageheader();
-	}
-
 	cmd->fn();
-
-	if (cmd->want_layout)
-		cgit_print_docend();
 }
 
 static int cmp_repos(const void *a, const void *b)
@@ -814,6 +800,8 @@ static void print_repo(FILE *f, struct cgit_repo *repo)
 		fprintf(f, "repo.module-link=%s\n", repo->module_link);
 	if (repo->section)
 		fprintf(f, "repo.section=%s\n", repo->section);
+	if (repo->homepage)
+		fprintf(f, "repo.homepage=%s\n", repo->homepage);
 	if (repo->clone_url)
 		fprintf(f, "repo.clone-url=%s\n", repo->clone_url);
 	fprintf(f, "repo.enable-atom-diff=%d\n",
@@ -848,6 +836,7 @@ static void print_repo(FILE *f, struct cgit_repo *repo)
 		fprintf(f, "repo.logo-link=%s\n", repo->logo_link);
 	fprintf(f, "repo.enable-remote-branches=%d\n", repo->enable_remote_branches);
 	fprintf(f, "repo.enable-subject-links=%d\n", repo->enable_subject_links);
+	fprintf(f, "repo.enable-html-serving=%d\n", repo->enable_html_serving);
 	if (repo->branch_sort == 1)
 		fprintf(f, "repo.branch-sort=age\n");
 	if (repo->commit_sort) {

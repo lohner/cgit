@@ -12,25 +12,28 @@
 #include "ui-shared.h"
 #include "ui-diff.h"
 
-static void add_entry(struct commit *commit, struct commitinfo *info, const char *host, int enable_atom_diff)
+static void add_entry(struct commit *commit, const char *host, int enable_atom_diff)
 {
 	char delim = '&';
 	char *hex;
 	char *hex_parent;
 	char *mail, *t, *t2;
+	struct commitinfo *info;
 
-	hex = sha1_to_hex(commit->object.sha1);
 	if (commit->parents) {
-		hex_parent = sha1_to_hex(commit->parents->item->object.sha1);
+		hex_parent = oid_to_hex(&commit->parents->item->object.oid);
 	} else {
 		hex_parent = NULL; /* means before initial commit */
 	}
+	info = cgit_parse_commit(commit);
+	hex = oid_to_hex(&commit->object.oid);
 	html("<entry>\n");
 	html("<title>");
 	html_txt(info->subject);
 	html("</title>\n");
 	html("<updated>");
-	cgit_print_date(info->committer_date, FMT_ATOMDATE, 0);
+	html_txt(show_date(info->committer_date, 0,
+                    date_mode_from_type(DATE_ISO8601_STRICT)));
 	html("</updated>\n");
 	html("<author>\n");
 	if (info->author) {
@@ -55,26 +58,26 @@ static void add_entry(struct commit *commit, struct commitinfo *info, const char
 	}
 	html("</author>\n");
 	html("<published>");
-	cgit_print_date(info->author_date, FMT_ATOMDATE, 0);
+	html_txt(show_date(info->author_date, 0,
+                    date_mode_from_type(DATE_ISO8601_STRICT)));
 	html("</published>\n");
 	if (host) {
+		char *pageurl;
 		html("<link rel='alternate' type='text/html' href='");
 		html(cgit_httpscheme());
 		html_attr(host);
-		html_attr(cgit_pageurl(ctx.repo->url, "commit", NULL));
+		pageurl = cgit_pageurl(ctx.repo->url, "commit", NULL);
+		html_attr(pageurl);
 		if (ctx.cfg.virtual_root)
 			delim = '?';
 		htmlf("%cid=%s", delim, hex);
 		html("'/>\n");
-
-		html("<id>");
-		html(cgit_httpscheme());
-		html_attr(host);
-		html_attr(cgit_repourl(ctx.repo->url));
-		htmlf("/commit/?id=%s</id>\n", hex);
-	} else {
-		htmlf("<id>urn:tag:%s</id>\n", hex);
+		free(pageurl);
 	}
+	htmlf("<id>%s</id>\n", hex);
+	html("<content type='text'>\n");
+	html_txt(info->msg);
+	html("</content>\n");
 	html("<content type='xhtml'>\n");
 	html("<div xmlns='http://www.w3.org/1999/xhtml'>\n");
 	html("<pre>\n");
@@ -92,17 +95,17 @@ static void add_entry(struct commit *commit, struct commitinfo *info, const char
 	html("</div>\n");
 	html("</content>\n");
 	html("</entry>\n");
+	cgit_free_commitinfo(info);
 }
 
 
 void cgit_print_atom(char *tip, char *path, int max_count, int enable_atom_diff)
 {
-	const char *host;
+	char *host;
 	const char *argv[] = {NULL, tip, NULL, NULL, NULL};
 	struct commit *commit;
 	struct rev_info rev;
 	int argc = 2;
-	int had_global_updated = 0;
 
 	if (ctx.qry.show_all)
 		argv[1] = "--all";
@@ -144,44 +147,22 @@ void cgit_print_atom(char *tip, char *path, int max_count, int enable_atom_diff)
 	html_txt(ctx.repo->desc);
 	html("</subtitle>\n");
 	if (host) {
+		char *repourl = cgit_repourl(ctx.repo->url);
 		html("<link rel='alternate' type='text/html' href='");
 		html(cgit_httpscheme());
 		html_attr(host);
-		html_attr(cgit_repourl(ctx.repo->url));
+		html_attr(repourl);
 		html("'/>\n");
-
-		html("<link rel='self' type='application/atom+xml' href='");
-		html(cgit_httpscheme());
-		html_attr(host);
-		html_attr(cgit_repourl(ctx.repo->url));
-		html("atom");
-		if (tip) {
-			html("/?h=");
-			html_txt(tip);
-		}
-		html("'/>\n");
-
-		html("<id>");
-		html(cgit_httpscheme());
-		html_txt(host);
-		html_txt(cgit_repourl(ctx.repo->url));
-		html("</id>\n");
+		free(repourl);
 	}
 
 	while ((commit = get_revision(&rev)) != NULL) {
-		struct commitinfo *info = cgit_parse_commit(commit);
-		if (!had_global_updated) {
-			html("<updated>");
-			cgit_print_date(info->committer_date, FMT_ATOMDATE, 0);
-			html("</updated>\n");
-			had_global_updated = 1;
-		}
-		add_entry(commit, info, host, enable_atom_diff);
+		add_entry(commit, host, enable_atom_diff);
 
-		cgit_free_commitinfo(info);
 		free_commit_buffer(commit);
 		free_commit_list(commit->parents);
 		commit->parents = NULL;
 	}
 	html("</feed>\n");
+	free(host);
 }
