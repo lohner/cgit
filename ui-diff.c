@@ -389,6 +389,10 @@ void cgit_print_diff(const char *new_rev, const char *old_rev,
 	const unsigned char *old_tree_sha1, *new_tree_sha1;
 	diff_type difftype;
 
+        /* reset global data */
+        files = 0;
+        slots = total_adds = total_rems = 0;
+
 	/*
 	 * If "follow" is set then the diff machinery needs to examine the
 	 * entire commit to detect renames so we must limit the paths in our
